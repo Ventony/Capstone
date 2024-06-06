@@ -91,18 +91,17 @@ void Display_2() { // OLED Display_2 [냉각수 온도, 흡기 온도, 엔진 �
 }
 
 void showDashboard() { // App 모니터링 관련 8가지 데이터
-  static const byte pids[] = {PID_RPM, PID_SPEED, PID_COOLANT_TEMP, PID_INTAKE_MAP, PID_ENGINE_LOAD, PID_THROTTLE, PID_INTAKE_MAP, PID_AIR_FUEL_EQUIV_RATIO};
+  static const byte pids[] = {PID_RPM, PID_SPEED, PID_COOLANT_TEMP, PID_INTAKE_TEMP, PID_ENGINE_LOAD, PID_THROTTLE, PID_INTAKE_MAP, PID_AIR_FUEL_EQUIV_RATIO};
     int values[sizeof(pids)];
     if (obd.readPID(pids, sizeof(pids), values) == sizeof(pids)) {
-      for (byte i = 0; i < sizeof(pids) ; i++) {
-        BTSerial.print(values[i]);
+      for (int i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        BTSerial.print(values[i]); // 값 출력
+        if (i < sizeof(values) / sizeof(values[0]) - 1) {
+          BTSerial.print(", "); // 마지막 요소가 아닐 때만 쉼표와 공백을 추가
+        }
       }
     }
-    else  {
-      for (byte i = 0; i < sizeof(pids) ; i++) {
-        BTSerial.print("0");
-      }
-    }
+    BTSerial.println(); // 줄바꿈
 }
 
 void performMonitoring() { // App 통합 모니터링 관련 모든 데이터
@@ -112,8 +111,12 @@ void performMonitoring() { // App 통합 모니터링 관련 모든 데이터
     if (obd.readPID(pids[i], numPids, values) == numPids) {
       for (int j = 0; j < numPids; j++) {
         BTSerial.print(values[j]);
+        if (J < numPids - 1) {
+          BTSerial.print(",");
+        }
       }
     }
+    BTSerial.println();
   }
 }
 
@@ -135,8 +138,7 @@ void showDrivingRecords() { // 평균속도, 이동거리 데이터
     float h = runtime / 3600;
     float averageSpeed = distance / h;
   }
-  BTSerial.print(averageSpeed, 1);
-  BTSerial.print(distance);
+  BTSerial.print(averageSpeed, 1); BTSerial.print(","); BTSerial.println(distance); BTSerial.println();
 }
 
 void performDiagnostics() { // 차량 진단
