@@ -24,7 +24,7 @@ const byte* pids[] = {pids1, pids2, pids3, pids4}; // 2차원 배열 생성
 const int sizes[] = {sizeof(pids1), sizeof(pids2), sizeof(pids3), sizeof(pids4)}; // 배열 크기의 배열 생성
 unsigned long lastTime = 0;   // 마지막으로 속도를 읽은 시간
 int distance, runtime, averageSpeed = 0; // 거리, 런타임, 평균속도 초기화
-int numScreens = 4; // 화면 갯수
+int numScreens = 3; // 화면 갯수
 bool screenActive[4] = {false, false, false, false}; // 화면 지정 초기화
 
 void testATcommands() { // OBD-II to Vehicle Test AT Commands
@@ -91,39 +91,28 @@ void Display_2() { // OLED Display_2 [냉각수 온도, 흡기 온도, 엔진 �
 }
 
 void showDashboard() { // App 모니터링 관련 8가지 데이터
-  static const byte pids[] = {PID_RPM, PID_SPEED, PID_COOLANT_TEMP, PID_INTAKE_TEMP, PID_ENGINE_LOAD, PID_THROTTLE, PID_INTAKE_MAP, PID_AIR_FUEL_EQUIV_RATIO};
+  static const byte pids[] = {PID_RPM, PID_SPEED, PID_COOLANT_TEMP, PID_INTAKE_MAP, PID_ENGINE_LOAD, PID_THROTTLE, PID_INTAKE_MAP, PID_AIR_FUEL_EQUIV_RATIO};
     int values[sizeof(pids)];
     if (obd.readPID(pids, sizeof(pids), values) == sizeof(pids)) {
-      Serial.print('[');
-      Serial.print(millis());
-      Serial.print(']');
       for (byte i = 0; i < sizeof(pids) ; i++) {
-        Serial.print((int)pids[i] | 0x100, HEX);
-        Serial.print('=');
-        Serial.print(values[i]);
-        Serial.print(' ');
-       }
-       Serial.println();
+        BTSerial.print(values[i]);
+      }
     }
-
+    else  {
+      for (byte i = 0; i < sizeof(pids) ; i++) {
+        BTSerial.print("0");
+      }
+    }
 }
 
 void performMonitoring() { // App 통합 모니터링 관련 모든 데이터
   for (int i = 0; i < 4; i++) {
     int numPids = sizes[i] / sizeof(pids[i][0]); // 배열의 실제 요소 수를 계산
     int values[numPids];
-    
     if (obd.readPID(pids[i], numPids, values) == numPids) {
-      Serial.print('[');
-      Serial.print(millis());
-      Serial.print(']');
       for (int j = 0; j < numPids; j++) {
-        Serial.print((int)pids[i][j] | 0x100, HEX);
-        Serial.print('=');
-        Serial.print(values[j]);
-        Serial.print(' ');
+        BTSerial.print(values[j]);
       }
-      Serial.println();
     }
   }
 }
@@ -137,69 +126,17 @@ void readBatteryVoltage() { // 배터리 전압 (사용 안하는 중)
   Serial.println('V');
 }
 
-void connectBluetooth() { //블루투스 연결 (앱 개발 완료 후 수정)
-  Serial.println("Checking Bluetooth connection...");
-
-  // Send an AT command to check connection status
-  Serial.println("AT");
-  delay(100); // Give some time for the module to respond
-
-  String response = "";
-  while (BTSerial.available()) {
-    char c = BTSerial.read();  // Read the response from the Bluetooth module
-    response += c;
-  }
-
-  if (response.indexOf("OK") != -1) {
-    // Response "OK" means the Bluetooth module is responsive, check if connected
-    Serial.println("AT+CONNL"); // This is a hypothetical command; replace with your module's actual command to check connection status
-    delay(100);
-
-    response = "";
-    while (BTSerial.available()) {
-      char c = BTSerial.read();
-      response += c;
-    }
-
-    if (response.indexOf("1") != -1) { // Assuming "1" means connected
-      Serial.println("Bluetooth is already connected.");
-    } else {
-      Serial.println("Bluetooth is not connected. Attempting to connect...");
-
-      // Attempt to connect; replace "AT+PAIR" with your actual command
-      Serial.println("AT+PAIR");
-      delay(2000); // Wait for the pairing to complete
-
-      // Check if the pairing was successful
-      Serial.println("AT+CONNL"); // Check connection status again
-      delay(100);
-
-      response = "";
-      while (BTSerial.available()) {
-        char c = BTSerial.read();
-        response += c;
-      }
-
-      if (response.indexOf("1") != -1) {
-        Serial.println("Bluetooth connection established.");
-      } else {
-        Serial.println("Failed to connect via Bluetooth.");
-      }
-    }
-  } else {
-    Serial.println("Failed to communicate with Bluetooth module.");
-  }
-}
 
 void showDrivingRecords() { // 평균속도, 이동거리 데이터
-  float averageSpeed = obd.getAverageSpeed();
-  float drivingScore = obd.getDrivingScore();
-  int distance;
-  obd.readPID(PID_DISTANCE, distance);
-  Serial.print("Current Speed: "); Serial.print(averageSpeed, 1); Serial.println("km/h");// 평균 속도
-  Serial.print("Total Distance: "); Serial.print(distance); Serial.println("km");// 이동거리
-  Serial.print("DrivingScore: "); Serial.print(drivingScore, 0);
-  
+  unsigned long currentTime = millis();
+  if (currentTime - lastTime >= 1000) {
+    obd.readPID(PID_DISTANCE, distance); // 누적 이동 거리
+    obd.readPID(PID_RUNTIME, runtime); // 누적 기동 시간
+    float h = runtime / 3600;
+    float averageSpeed = distance / h;
+  }
+  BTSerial.print(averageSpeed, 1);
+  BTSerial.print(distance);
 }
 
 void performDiagnostics() { // 차량 진단
@@ -224,7 +161,7 @@ void performDiagnostics() { // 차량 진단
     uint16_t codes[6];
     byte dtcCount = obd.readDTC(codes, 6);
     if (dtcCount == 0) {
-      Serial.println("No Diagnostic Trouble Codes (DTCs) found.");
+      BTSerial.print(dtcCount);
       u8g1.firstPage();
       do {
         u8g1.setPrintPos(0, 15); u8g1.print("Diagnositc");
@@ -241,8 +178,7 @@ void performDiagnostics() { // 차량 진단
       } while(u8g2.nextPage());
     }
     else {
-      Serial.print(dtcCount); 
-      Serial.print(" DTC:");
+      BTSerial.print(dtcCount);
       u8g1.firstPage();
       do {
         u8g1.setPrintPos(0, 15); u8g1.print("Diagnositc");
@@ -251,15 +187,13 @@ void performDiagnostics() { // 차량 진단
         u8g1.setPrintPos(0, 60); u8g1.print("Complete");
       } while(u8g1.nextPage());
       for (byte n = 0; n < dtcCount; n++) {
-        Serial.print(' ');
-        Serial.print(codes[n], HEX);
+        BTSerial.print(codes[n], HEX);
       }
-      Serial.println();
     }
     delay(10000); // Pause for 10 sec after successful fetch of DTC codes.
   }
   else {
-    Serial.println("Vehicle is Running!!! Can't Running DTC");
+    BTSerial.print("666"); // Vehicle Running Error Code "666"
     u8g1.firstPage();
     do {
       u8g1.setPrintPos(0, 15); u8g1.print("Vehicle");
@@ -279,7 +213,7 @@ void performDiagnostics() { // 차량 진단
 
 void performDiagnostics_clear() { // 진단 코드 삭제
     obd.clearDTC();
-    Serial.println("Diagnostic Trouble Codes (DTC) cleared.");
+    BTSerial.print("777"); // Vehicle DTC Clear Code "777"
     u8g1.firstPage();
     do {
       u8g1.setPrintPos(0, 15); u8g1.print("Diagnositc");
@@ -295,29 +229,6 @@ void performDiagnostics_clear() { // 진단 코드 삭제
       u8g2.setPrintPos(0, 60); u8g2.print("LOAD");
     } while(u8g2.nextPage());
     delay(10000); // Pause for 10 sec after successful fetch of DTC codes.
-}
-
-void select_menu() { // App 버튼 별 데이터 출력 전환
-  for (int i = 0; i < numScreens; i++) {
-    if (screenActive[i]) {
-      switch (i + 1) {
-        case 1:
-          showDashboard();
-          break;
-        case 2:
-          performMonitoring();
-          break;
-        case 3:
-          showDrivingRecords();
-          break;
-        case 4:
-          connectBluetooth();
-          break;
-        default:
-          break;
-      }
-    }
-  }
 }
 
 void setup() {
@@ -348,13 +259,7 @@ void setup() {
   for (;;) {
     delay(1000);
     byte version = obd.begin();
-    Serial.print("Freematics OBD-II Adapter ");
     if (version > 0) {
-      Serial.println("detected");
-      Serial.print("OBD firmware version ");
-      Serial.print(version / 10);
-      Serial.print('.');
-      Serial.println(version % 10);
       u8g1.firstPage();
       do {
         u8g1.setPrintPos(0, 20); u8g1.print("Freematics");
@@ -369,7 +274,6 @@ void setup() {
       break;
     }
     else {
-      Serial.println("not detected");
       u8g1.firstPage();
       do {
         u8g1.setPrintPos(0, 20); u8g1.print("Freematics");
@@ -383,7 +287,6 @@ void setup() {
 
   // initialize OBD-II adapter
   do {
-    Serial.println("Connecting...");
     u8g1.firstPage();
     do {
       u8g1.setPrintPos(0, 20); u8g1.print("Freematics");
@@ -391,8 +294,6 @@ void setup() {
       u8g1.setPrintPos(0, 60); u8g1.print("Connecting...");
     } while(u8g1.nextPage());
   } while (!obd.init());
-  Serial.println("OBD connected!");
-  obd.startMonitoring();
   u8g1.firstPage();
   do {
     u8g1.setPrintPos(0, 20); u8g1.print("Freematics");
@@ -424,7 +325,23 @@ void loop() {
 
     if (screenId >= 1 && screenId <= numScreens) {
       screenActive[screenId - 1] = true; // 화면 활성화
-      select_menu();
+      for (int i = 0; i < numScreens; i++) {
+        if (screenActive[i]) {
+          switch (i + 1) {
+            case 1:
+              showDashboard();
+              break;
+            case 2:
+              performMonitoring();
+              break;
+            case 3:
+              showDrivingRecords();
+              break;
+            default:
+              break;
+          }
+        }
+      }
     }
     else {
       switch (screenId) {
@@ -442,4 +359,3 @@ void loop() {
   Display_1();
   Display_2();
 }
-
