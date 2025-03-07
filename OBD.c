@@ -25,6 +25,8 @@ const int sizes[] = {sizeof(pids1), sizeof(pids2), sizeof(pids3), sizeof(pids4)}
 unsigned long lastTime = 0;   // 마지막으로 속도를 읽은 시간
 int distance, runtime, averageSpeed = 0; // 거리, 런타임, 평균속도 초기화
 int numScreens = 3; // 화면 갯수
+int screenId;
+int statePin = 33;
 bool screenActive[4] = {false, false, false, false}; // 화면 지정 초기화
 
 void testATcommands() { // OBD-II to Vehicle Test AT Commands
@@ -35,6 +37,10 @@ void testATcommands() { // OBD-II to Vehicle Test AT Commands
     const char *cmd = cmds[i];
     Serial.print("Sending ");
     Serial.println(cmd);
+    u8g2.firstPage();
+    do {
+      u8g2.setPrintPos(0, 20); u8g2.print("Sending "); u8g2.print(cmd);
+    } while(u8g2.nextPage());
     if (obd.sendCommand(cmd, buf, sizeof(buf))) {
       char *p = strstr(buf, cmd);
       if (p)
@@ -59,19 +65,20 @@ void testATcommands() { // OBD-II to Vehicle Test AT Commands
   Serial.println();
 }
 
-void Display_1() { // OLED Display_1 [RPM, 속도, 이동거리, 런타임]
-  static const byte pids[] = {PID_RPM, PID_SPEED, PID_DISTANCE, PID_RUNTIME};
+void Display_1() { // OLED Display_1 [RPM, 속도, 전압, 런타임]
+  static const byte pids[] = {PID_RPM, PID_SPEED, PID_RUNTIME};
   int values[sizeof(pids)];
   if (obd.readPID(pids, sizeof(pids), values) == sizeof(pids)) {
+    int h = values[3] / 3600;
+    int m = (values[3] % 3600) / 60;
+    int s = (values[3] % 3600) % 60;
+
     u8g1.firstPage();
     do {
-      u8g1.setPrintPos(0, 15); u8g1.print("Rpm: "); u8g1.print(values[0]); u8g1.print("'C");
-      u8g1.setPrintPos(0, 30); u8g1.print("Speed: "); u8g1.print(values[1]); u8g1.print("'C");
-      u8g1.setPrintPos(0, 45); u8g1.print("Distance: "); u8g1.print(values[2]); u8g1.print("%");
-      int h = values[3] / 3600;
-      int m = (values[3] % 3600) / 60;
-      int s = (values[3] % 3600) % 60;
-      u8g1.setPrintPos(0, 60); u8g1.print("Runtime: "); u8g1.print(h); u8g1.print(":"); u8g1.print(m); u8g1.print(":"); u8g1.print(s);
+      u8g1.setPrintPos(0, 15); u8g1.print("RPM "); u8g1.setPrintPos(64,15); u8g1.print("SPEED");
+      u8g1.setPrintPos(0, 30); u8g1.print(values[0]); u8g1.setPrintPos(64,30); u8g1.print(values[1]); u8g1.print("km/h");
+      u8g1.setPrintPos(0, 45); u8g1.print("Voltage"); u8g1.setPrintPos(64, 45); u8g1.print("Running");
+      u8g1.setPrintPos(0, 60); u8g1.print(obd.getVoltage(), 1); u8g1.print(" V"); u8g1.setPrintPos(64, 60); u8g1.print(values[2]);
     } while (u8g1.nextPage());
   }
 }
@@ -82,10 +89,10 @@ void Display_2() { // OLED Display_2 [냉각수 온도, 흡기 온도, 엔진 �
   if (obd.readPID(pids, sizeof(pids), values) == sizeof(pids)) {
     u8g2.firstPage();
     do {
-      u8g2.setPrintPos(0, 15); u8g2.print("Coolant: "); u8g2.print(values[0]); u8g2.print("'C");
-      u8g2.setPrintPos(0, 30); u8g2.print("Intake: "); u8g2.print(values[1]); u8g2.print("'C");
-      u8g2.setPrintPos(0, 45); u8g2.print("Load: "); u8g2.print(values[2]); u8g2.print("%");
-      u8g2.setPrintPos(0, 60); u8g2.print("Throttle: "); u8g2.print(values[3]); u8g2.print("%");
+      u8g2.setPrintPos(0, 15); u8g2.print("Coolant"); u8g2.setPrintPos(64,15); u8g2.print("Intake");
+      u8g2.setPrintPos(0, 30); u8g2.print(values[0]);u8g2.print("'C"); u8g2.setPrintPos(64,30); u8g2.print(values[1]); u8g2.print("'C");
+      u8g2.setPrintPos(0, 45); u8g2.print("Engine"); u8g2.setPrintPos(64,45); u8g2.print("Throttle");
+      u8g2.setPrintPos(0, 60); u8g2.print(values[2]); u8g2.print("%"); u8g2.setPrintPos(64,60); u8g2.print(values[3]); u8g2.print("%");
     } while (u8g2.nextPage());
   }
 }
@@ -93,52 +100,42 @@ void Display_2() { // OLED Display_2 [냉각수 온도, 흡기 온도, 엔진 �
 void showDashboard() { // App 모니터링 관련 8가지 데이터
   static const byte pids[] = {PID_RPM, PID_SPEED, PID_COOLANT_TEMP, PID_INTAKE_TEMP, PID_ENGINE_LOAD, PID_THROTTLE, PID_INTAKE_MAP, PID_AIR_FUEL_EQUIV_RATIO};
     int values[sizeof(pids)];
+    String output = "";
     if (obd.readPID(pids, sizeof(pids), values) == sizeof(pids)) {
       for (int i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
-        BTSerial.print(values[i]); // 값 출력
+        output += String(values[i]);
         if (i < sizeof(values) / sizeof(values[0]) - 1) {
-          BTSerial.print(", "); // 마지막 요소가 아닐 때만 쉼표와 공백을 추가
+          output += ",";
         }
       }
+      BTSerial.println(output);
     }
-    BTSerial.println(); // 줄바꿈
 }
 
 void performMonitoring() { // App 통합 모니터링 관련 모든 데이터
+  String output = "";
   for (int i = 0; i < 4; i++) {
-    int numPids = sizes[i] / sizeof(pids[i][0]); // 배열의 실제 요소 수를 계산
+    int numPids = sizes[i] / sizeof(pids[i][0]);
     int values[numPids];
     if (obd.readPID(pids[i], numPids, values) == numPids) {
-      for (int j = 0; j < numPids; j++) {
-        BTSerial.print(values[j]);
-        if (J < numPids - 1) {
-          BTSerial.print(",");
+       for (int j = 0; j < numPids; j++) {
+        output += String(values[j]);
+        if (j < numPids - 1 || i < 3) {
+          output += ",";
         }
       }
     }
-    BTSerial.println();
   }
+  output += String(obd.getVoltage(), 1);
+  BTSerial.println(output);
 }
 
-void readBatteryVoltage() { // 배터리 전압 (사용 안하는 중)
-  Serial.print('[');
-  Serial.print(millis());
-  Serial.print(']');
-  Serial.print("Battery:");
-  Serial.print(obd.getVoltage(), 1);
-  Serial.println('V');
-}
-
-
-void showDrivingRecords() { // 평균속도, 이동거리 데이터
-  unsigned long currentTime = millis();
-  if (currentTime - lastTime >= 1000) {
-    obd.readPID(PID_DISTANCE, distance); // 누적 이동 거리
-    obd.readPID(PID_RUNTIME, runtime); // 누적 기동 시간
-    float h = runtime / 3600;
-    float averageSpeed = distance / h;
-  }
-  BTSerial.print(averageSpeed, 1); BTSerial.print(","); BTSerial.println(distance); BTSerial.println();
+void showDrivingRecords() { // 평균속도, 이동거리, 주행점수 데이터
+  float averageSpeed = obd.getAverageSpeed();
+  float drivingScore = obd.getDrivingScore();
+  int distance;
+  obd.readPID(PID_DISTANCE, distance);
+  BTSerial.print(averageSpeed, 1); BTSerial.print(","); BTSerial.print(distance); BTSerial.print(","); BTSerial.println(drivingScore, 0);
 }
 
 void performDiagnostics() { // 차량 진단
@@ -192,7 +189,7 @@ void performDiagnostics() { // 차량 진단
         BTSerial.print(codes[n], HEX);
       }
     }
-    delay(10000); // Pause for 10 sec after successful fetch of DTC codes.
+    delay(7000); // Pause for 10 sec after successful fetch of DTC codes.
   }
   else {
     BTSerial.print("666"); // Vehicle Running Error Code "666"
@@ -210,10 +207,15 @@ void performDiagnostics() { // 차량 진단
       u8g2.setPrintPos(0, 45); u8g2.print("Only");
       u8g2.setPrintPos(0, 60); u8g2.print("ACC");
     } while(u8g2.nextPage());
+    delay(5000);
   }
 }
 
 void performDiagnostics_clear() { // 진단 코드 삭제
+  int speed, rpm;
+  obd.readPID(PID_SPEED, speed);
+  obd.readPID(PID_RPM, rpm);
+  if (speed == 0 && rpm <= 200) { // 차량이 시동이 걸려있지 않는 상황 (예시)
     obd.clearDTC();
     BTSerial.print("777"); // Vehicle DTC Clear Code "777"
     u8g1.firstPage();
@@ -230,13 +232,29 @@ void performDiagnostics_clear() { // 진단 코드 삭제
       u8g2.setPrintPos(0, 45); u8g2.print("CLN");
       u8g2.setPrintPos(0, 60); u8g2.print("LOAD");
     } while(u8g2.nextPage());
-    delay(10000); // Pause for 10 sec after successful fetch of DTC codes.
+    delay(7000); // Pause for 10 sec after successful fetch of DTC codes.
+  }
+  else {
+    BTSerial.print("666"); // Vehicle Running Error Code "666"
+    u8g1.firstPage();
+    do {
+      u8g1.setPrintPos(0, 15); u8g1.print("Vehicle");
+      u8g1.setPrintPos(0, 30); u8g1.print("is Running!");
+      u8g1.setPrintPos(0, 45); u8g1.print("Can't Run");
+      u8g1.setPrintPos(0, 60); u8g1.print("DTC");
+    } while(u8g1.nextPage());
+    u8g2.firstPage();
+    do {
+      u8g2.setPrintPos(0, 15); u8g2.print("Turn off");
+      u8g2.setPrintPos(0, 30); u8g2.print("Vehicle");
+      u8g2.setPrintPos(0, 45); u8g2.print("Only");
+      u8g2.setPrintPos(0, 60); u8g2.print("ACC");
+    } while(u8g2.nextPage());
+    delay(5000);
+  }
 }
 
-void setup() {
-  u8g1.setFont(u8g_font_unifont); // Choose a suitable font
-  u8g2.setFont(u8g_font_unifont); // Choose a suitable font
-  
+void boot_display() {
   u8g1.firstPage();
   do {
     u8g1.setPrintPos(0, 15); u8g1.print("SH1106");
@@ -251,8 +269,14 @@ void setup() {
     u8g2.setPrintPos(0, 45); u8g2.print("OBD-II");
     u8g2.setPrintPos(0, 60); u8g2.print("Adapter");
   } while(u8g2.nextPage());
-  delay(5000);
+}
 
+
+void setup() {
+  u8g1.setFont(u8g_font_unifont); // Choose a suitable font
+  u8g2.setFont(u8g_font_unifont); // Choose a suitable font
+  boot_display();
+  delay(2000);
   Serial.begin(115200);
   OBDSerial.begin(115200);
   BTSerial.begin(115200);
@@ -282,6 +306,12 @@ void setup() {
         u8g1.setPrintPos(0, 40); u8g1.print("OBD-II Adapter");
         u8g1.setPrintPos(0, 60); u8g1.print("NOT DETECTED");
       } while(u8g1.nextPage());
+      u8g2.firstPage();
+      do {
+        u8g2.setPrintPos(0, 20); u8g2.print("OBD-II Firmware");
+        u8g2.setPrintPos(0, 40); u8g2.print("Version");
+        u8g2.setPrintPos(0, 60); u8g2.print("NOT DETECTED");
+      } while(u8g2.nextPage());
     }
   }
   // send some commands for testing and show response for debugging purpose
@@ -295,6 +325,7 @@ void setup() {
       u8g1.setPrintPos(0, 40); u8g1.print("OBD-II Adapter");
       u8g1.setPrintPos(0, 60); u8g1.print("Connecting...");
     } while(u8g1.nextPage());
+    delay(1000);
   } while (!obd.init());
   u8g1.firstPage();
   do {
@@ -305,8 +336,8 @@ void setup() {
 
   char buf[64];
   if (obd.getVIN(buf, sizeof(buf))) {
-    Serial.print("VIN:");
-    Serial.println(buf);
+    BTSerial.print("VIN:");
+    BTSerial.println(buf);
     u8g2.firstPage();
     do {
       u8g2.setPrintPos(0, 15); u8g2.print("Vehicle");
@@ -315,7 +346,7 @@ void setup() {
       u8g2.setPrintPos(0, 60); u8g2.print(buf);
     } while(u8g2.nextPage());
   }
-  delay(10000);
+  delay(3000);
 }
 
 void loop() {
@@ -323,41 +354,45 @@ void loop() {
   Display_2(); // SH1106 OLED Display_2
   if (BTSerial.available()) {       // Bluetooth 데이터 값 유무 확인
     char received = BTSerial.read(); // 데이터 없는 경우 -1 할당
-    int screenId = received - '0'; // 전송받은 문자를 숫자로 변환
-
-    if (screenId >= 1 && screenId <= numScreens) {
-      screenActive[screenId - 1] = true; // 화면 활성화
-      for (int i = 0; i < numScreens; i++) {
-        if (screenActive[i]) {
-          switch (i + 1) {
-            case 1:
-              showDashboard();
-              break;
-            case 2:
-              performMonitoring();
-              break;
-            case 3:
-              showDrivingRecords();
-              break;
-            default:
-              break;
-          }
+    if (received >= '1' && received <= '5') {
+      screenId = received - '0'; // 전송받은 문자를 숫자로 변환
+    }
+  }
+  if (screenId >= 1 && screenId <= numScreens) {
+    screenActive[screenId - 1] = true; // 화면 활성화
+    for (int i = 0; i < numScreens; i++) {
+      if (screenActive[i]) {
+        switch (i + 1) {
+          case 1:
+            showDashboard();
+            screenActive[i] = false;
+            break;
+          case 2:
+            performMonitoring();
+            screenActive[i] = false;
+            break;
+          case 3:
+            showDrivingRecords();
+            screenActive[i] = false;
+            break;
+          default:
+            break;
         }
       }
     }
-    else {
-      switch (screenId) {
-        case 5:
-          performDiagnostics();
-          break;
-        case 6:
-          performDiagnostics_clear();
-          break;
-        default:
-          break;
-      }
+  }
+  else {
+    switch (screenId) {
+      case 4:
+        performDiagnostics();
+        screenId = 0;
+        break;
+      case 5:
+        performDiagnostics_clear();
+        screenId = 0;
+        break;
+      default:
+        break;
     }
   }
-  Display_1();
-  Display_2();
 }
